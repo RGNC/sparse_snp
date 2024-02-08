@@ -10,6 +10,6 @@ You need the CUDA toolkit 11 or 12 accesible in your system.
 2. Define where the libraries of CUDA are, e.g.: `export LD_LIBRARY_PATH=/usr/local/cuda-12.1/lib64:$LD_LIBRARY_PATH`
 3. Simple type `make`
 
-## Exeuction
+## Execution
 
 You should see the binary inside `bin` folder. There is a help menu by simply typing `bin/ssnp`. It will help you to reproduce the results of our paper
