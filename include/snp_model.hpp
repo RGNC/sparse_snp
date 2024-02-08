@@ -10,18 +10,28 @@ typedef unsigned int        uint;
 typedef unsigned char       uchar;
 
 #include <iostream>
-#include <utility>
-#include "cublas_v2.h"
-#include <cuda_profiler_api.h>
 #include <fstream>
+#include <cuda.h>
+#include <cuda_runtime.h>
+#include "cublas_v2.h"
+#include <cusparse.h> 
+
+using namespace std;
 
 class SNP_model
 {
 public:
-    
-    SNP_model(uint n, uint m, int mode, int verbosity, bool write2csv, int repetition);
+    SNP_model(uint n, uint m, bool using_lib=false);
     ~SNP_model();
-
+    
+    /** indicate verbosity level, number of times the whole
+    *   computation is repeated and whether write of the 
+    *   output to a file is intended
+    */
+    void set_snpconfig(int verbosity_lv, int repetitions, char* outfile, bool count_time, bool get_mem_info=false); 
+    /** Writes computed configuration to file 
+    */
+    void write_to_file();
     /** 
      * Set a number of spikes, given by s, in the neuron nid.
      * This method should be used to create the initial configuration.
@@ -34,7 +44,7 @@ public:
      * Add a rule to neuron nid, 
      * regular expression defined by e_n and e_i, and a^c -> a^p.
      * This must be called sorted by neuron, and before adding synapses */
-    void add_rule (uint nid, int e_n, int e_i, int c, int p, uint d);
+    void add_rule (uint nid, uint e_n, uint e_i, uint c, uint p, uint d);
     /** 
      * Add synapse from neuron i to j. 
      * This must be called after adding all rules */
@@ -42,174 +52,91 @@ public:
     /** 
      * Perform a transition step on the model. 
      * Returns if no more steps can be done. */
-    bool transition_step();
+    bool transition_step(int i=-1);
+    /**
+     * Prints configuration vector. If cpu not updated, downloads it from gpu first.
+     */
+    void print_conf_vector(ofstream *fs=NULL);
     /** 
      * Simulate a computation of the model. 
      * Optionally, set a limit to l steps */
-    void compute(int l=1) { while(l-->=1 || !transition_step()); };
-    // void compute(int l=1) { while(l-->=1) transition_step(); };
+    //  void compute(int l=3) { while(l--) {transition_step();} };
+    void compute(int i=-1); //(optional) provide a number of times for the exact times the computations will be performed. Pass -1 to ignore parameter.
 
 protected:
-    uint n;           //TODO:change to n_neurons        // number of neurons
-    uint m;           //TODO:change to n_rules         // number of rules
-    int z;                    //number of rows of trans_matrix_ell
-    int step;                 //step of computation
-    int ex_mode;              //execution mode. SPARSE, ELL=1, OPTIMIZED=2
-    int verbosity;
-    bool * calc_next_trans;
-    
+    uint n;        // number of neurons
+    uint m;        // number of rules
+
     // CPU part
-    int * conf_vector;     // configuration vector (# neurons)
-    int  * trans_matrix;   // transition matrix (# rules * # neurons), requires negative numbers
-    int * spiking_vector;  // spiking vector
-    
-    int * delays_vector;  // #rules. Delays for each neuron. 
-    int   * rule_index;      // indicates for each neuron, the starting rule index (# neurons+1)
-    int * z_vector;
+    uint *delays_vector;
+    uint *conf_vector;     // configuration vector (# neurons)
+    float *f_conf_vector;
+    int *trans_matrix;    // transition matrix (# rules * # neurons)
+    int *spiking_vector;  // spiking vector (# neurons)
+    int   *rule_index;      // indicates for each neuron, the starting rule index (# neurons+1)
 
     struct _rule {
-        int  * En;          // indicates for each rule, the regular expression multiplicity
-        int  * Ei;          // indicates for each rule, the regular expression type
-        int  * c;           // indicates for each rule, the LHS
-        int  * p;           // indicates for each rule, the RHS
-        uint *d;              // indicates for each rule, the delay until it's fired
-        uint   * nid;         // indicates for each rule, the corresponding neuron (#rules)
-        
-
+        uint  *En;          // indicates for each rule, the regular expression multiplicity
+        uint  *Ei;          // indicates for each rule, the regular expression type
+        uint  *c;           // indicates for each rule, the LHS
+        uint  *p;           // indicates for each rule, the RHS
+        uint   *d;
+        uint   *nid;         // indicates for each rule, the corresponding neuron (#rules)
     } rules, d_rules;
-    std::ofstream csv;
-    
-    // GPU counterpart
-    int * d_conf_vector;
-    int * d_conf_vector_cpy;
-    int  * d_trans_matrix;
-    int * d_spiking_vector;
-    int * d_delays_vector;
-    int   * d_rule_index;      // indicates for each neuron, the starting rule index (# neurons+1)
-    bool * d_calc_next_trans;
-    cudaStream_t stream1;
-    cudaStream_t stream2;
-
-
-    //////////////////////////////////////CUBLAS variables/////////////////////////////////////////////////
-    float * cublas_conf_vector;
-    float  * cublas_trans_matrix;   // transition matrix (# rules * # neurons), requires negative numbers
-    float * cublas_spiking_vector;  // spiking vector
-    float * spiking_vector_aux;
-    
 
     // GPU counterpart
-    float * d_cublas_conf_vector;
-    float * d_cublas_trans_matrix;
-    float * d_cublas_spiking_vector;
-    float * d_cublas_spiking_vector_aux;   //auxiliar spiking vector for use with cublas 
-    
-    //////////////////////////////////////////////////////////////////////////////////////////////////////
+    uint *d_delays_vector;
+    uint *d_conf_vector;
+    float *df_conf_vector;
+    int *d_trans_matrix;
+    int *d_spiking_vector;
+    int *d_rule_index;      // indicates for each neuron, the starting rule index (# neurons+1)
 
-    
     // Consistency flags
-    bool delays_active=0;
-    bool transMX_printed =0;
-    bool gpu_updated =0;           // true if GPU copy is updated
-    bool cpu_updated =0;           // true if CPU copy is updated
-    bool done_rules = 0;            // true if all rules have been introduced (preventing adding synapses)
-    bool write_CSV;
-
-    // Auxiliary variables
-    float elapsed = 0;
-    cudaEvent_t start, stop;
+    bool gpu_updated;           // true if GPU copy is updated
+    bool cpu_updated;           // true if CPU copy is updated
+    bool done_rules;            // true if all rules have been introduced (preventing adding synapses)
+    bool *calc_next_trans;      // true if next transition has to be calculated (stored in slot 0). Host variable
+    bool *d_calc_next_trans;    // Device variable
+    bool using_lib;             // true if using either cublas or cusparse libraries
+    
+    // Config variables
+    int verbosity_lv;
+    int repetitions;
+    char *outfile;
+    bool count_time;
+    int step;                   // Step in which the computation is in
+    bool get_mem_info;
 
     // auxiliary methods
-    void printSpikingV();
-    void printDelaysV();
-    void printConfV();
     /** 
      * Load the introduced model to the GPU.
      * The status of model computation gets reset */
     void load_to_gpu();
     /** 
      * Download information from the GPU. */
-    void load_to_cpu(cudaStream_t stream);  
-    void calc_z();
-    
+    void load_to_cpu();  
+    /**
+     * Calculates the spiking vector with the current configuration */
 
     // auxiliary virtual methods (to be defined in the different simulators)    
     // @override define this method to include a synapse in the transition matrix 
     virtual void include_synapse(uint i, uint j) = 0;
     // @override define this method to send the transition matrix to GPU
-    virtual void calc_spiking_vector() = 0;
-    virtual void printTransMX() = 0;
     virtual void load_transition_matrix() = 0;
+    // @override define method to obtain spiking vector
+    virtual void calc_spiking_vector() = 0;
+    // @override define method to check if next transitions needs to be calculated. */
+    virtual bool check_next_trans() = 0;
     // @override define this method to compute the transition, once the spiking vector is calculated
     virtual void calc_transition() = 0;
-
-
+    // @override define this method to print the transition matrix
+    virtual void print_transition_matrix() = 0;
+    // @override define this method to print the spiking vector
+    virtual void print_spiking_vector() = 0;
+    // @override define this method to print the delays vector
+    virtual void print_delays_vector() = 0;
 };
-
-//version cpu es una prueba. Se eliminará en un futuro.
-// class SNP_model_cpu
-// {
-// public:
-//     SNP_model_cpu(uint n, uint m);
-//     ~SNP_model_cpu();
-
-//     /** 
-//      * Set a number of spikes, given by s, in the neuron nid.
-//      * This method should be used to create the initial configuration.
-//      * This replaces previous value in that neuron in the configuration */
-//     void set_spikes (uint nid, ushort s);
-//     /** 
-//      * Consult number of spikes in neuron nid. */
-//     ushort get_spikes (uint nid);
-//     /** 
-//      * Add a rule to neuron nid, 
-//      * regular expression defined by e_n and e_i, and a^c -> a^p.
-//      * This must be called sorted by neuron, and before adding synapses */
-//     void add_rule (uint nid, uchar e_n, uchar e_i, uchar c, uchar p);
-//     /** 
-//      * Add synapse from neuron i to j. 
-//      * This must be called after adding all rules */
-//     void add_synapse (uint i, uint j);
-//     /** 
-//      * Perform a transition step on the model. 
-//      * Returns if no more steps can be done. */
-//     bool transition_step();
-//     /** 
-//      * Simulate a computation of the model. 
-//      * Optionally, set a limit to l steps */
-//     void compute(int l=1) { while(l-->=0 || !transition_step()); };
-
-// //protected:
-// public:
-//     uint n;                   // number of neurons
-//     uint m;                   // number of rules
-
-//     // CPU part
-//     ushort * conf_vector;     // configuration vector (# neurons)
-//     short  * trans_matrix;    // transition matrix (# rules * # neurons), requires negative numbers
-//     ushort * spiking_vector;  // spiking vector (# neurons)
-//     uint   * rule_index;      // indicates for each neuron, the starting rule index (# neurons+1)
-
-//     struct _rule {
-//         uchar  * En;          // indicates for each rule, the regular expression multiplicity
-//         uchar  * Ei;          // indicates for each rule, the regular expression type
-//         uchar  * c;           // indicates for each rule, the LHS
-//         uchar  * p;           // indicates for each rule, the RHS
-//         uint   * nid;         // indicates for each rule, the corresponding neuron (#rules)
-//     } rules, d_rules;
-
-//     //Consistency flags
-//     bool done_rules;            // true if all rules have been introduced (preventing adding synapses)
-
-//     // auxiliary methods
-//     // auxiliary virtual methods (to be defined in the different simulators)    
-//     // @override define this method to include a synapse in the transition matrix 
-//     virtual void include_synapse(uint i, uint j) = 0;
-//     virtual void calc_spiking_vector() = 0;
-//     // @override define this method to compute the transition, once the spiking vector is calculated
-//     virtual void calc_transition() = 0;
-// };
-
 
 
 #endif

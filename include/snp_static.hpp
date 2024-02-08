@@ -2,135 +2,6 @@
 #define _SNP_MODEL_STATIC_
 
 #include "snp_model.hpp"
-#include <cusparse.h>
-#include "cublas_v2.h"
-
-class SNP_static: public SNP_model
-{
-public:
-    SNP_static(uint n, uint m, int mode, int verbosity, bool write2csv, int repetition=0);
-    ~SNP_static();
-    
-
-protected:
-    void printTransMX();
-    void include_synapse(uint i, uint j);
-    /* Calculates the spiking vector with the current configuration */
-    void calc_spiking_vector();
-    void load_transition_matrix();
-    void calc_transition();
-
-};
-
-class SNP_static_ell: public SNP_model
-{
-public:
-    SNP_static_ell(uint n, uint m, int mode, int verbosity, bool write2csv, int repetition=0);
-    ~SNP_static_ell();
-
-protected:
-    void printTransMX();
-    void include_synapse(uint i, uint j);
-    void calc_spiking_vector();
-    void load_transition_matrix();
-    void calc_transition();
-
-};
-
-class SNP_static_optimized: public SNP_model
-{
-public:
-    SNP_static_optimized(uint n, uint m, int mode, int verbosity, bool write2csv, int repetition=0);
-    ~SNP_static_optimized();
-
-protected:
-    void printTransMX();
-    void include_synapse(uint i, uint j);
-    /* Calculates the spiking vector with the current configuration */
-    void calc_spiking_vector();
-    void load_transition_matrix();
-    void calc_transition();
-
-};
-
-class SNP_static_cublas: public SNP_model
-{
-public:
-    SNP_static_cublas(uint n, uint m, int mode, int verbosity, bool write2csv, int repetition=0);
-    ~SNP_static_cublas();
-    
-
-protected:
-    cublasHandle_t handle = NULL;
-    void printTransMX();
-    void include_synapse(uint i, uint j);
-    /* Calculates the spiking vector with the current configuration */
-    void calc_spiking_vector();
-    void load_transition_matrix();
-    void calc_transition();
-
-};
-
-class SNP_static_cusparse: public SNP_model
-{
-public:
-    SNP_static_cusparse(uint n, uint m, int mode, int verbosity, bool write2csv, int repetition=0);
-    ~SNP_static_cusparse();
-    
-
-protected:
-    int * nnz;
-    int nnz0;
-    int * d_nnz;
-    int * d_csrOffsets;
-    int * d_csrColumns;
-    float * d_csrValues;
-    bool buffer_created = false;
-    size_t bufferSize;
-    void* d_buffer = NULL;
-
-    int * d_spiking_vector_aux;
-    cusparseHandle_t     cusparse_handle = NULL;
-    cusparseSpMatDescr_t cusparse_trans_mx;
-    cusparseDnVecDescr_t cusparse_spkv, cusparse_confv;
-
-    void printTransMX();
-    void include_synapse(uint i, uint j);
-    /* Calculates the spiking vector with the current configuration */
-    void calc_spiking_vector();
-    void load_transition_matrix();
-    void calc_transition();
-
-};
-
-// class SNP_static_cpu: public SNP_model_cpu
-// {
-// public:
-//     SNP_static_cpu(uint n, uint m);
-    
-//     ~SNP_static_cpu();
-
-// protected:
-//     void include_synapse(uint i, uint j);
-//     /* Calculates the spiking vector with the current configuration */
-//     void calc_spiking_vector();
-//     void calc_transition();
-
-// };
-
-/* TODO:
-
-class SNP_static_cusparse: public SNP_model
-{
-public:
-    SNP_static_cusparse(uint n, uint m);
-    ~SNP_static_cusparse();
-
-protected:
-    void include_synapse(uint i, uint j);
-    void load_transition_matrix();
-    void calc_transition();
-};
 
 class SNP_static_sparse: public SNP_model
 {
@@ -141,7 +12,122 @@ public:
 protected:
     void include_synapse(uint i, uint j);
     void load_transition_matrix();
+    void calc_spiking_vector();
+    bool check_next_trans();
     void calc_transition();
-};*/
+    void print_transition_matrix();
+    void print_spiking_vector();
+    void print_delays_vector();
+
+};
+
+class SNP_static_ell: public SNP_model
+{
+public:
+    SNP_static_ell(uint n, uint m);
+    ~SNP_static_ell();
+
+protected:
+    int *z_vector;
+    int z;
+
+    void include_synapse(uint i, uint j);
+    void load_transition_matrix();
+    void calc_spiking_vector();
+    bool check_next_trans();
+    void calc_transition();
+    void print_transition_matrix();
+    void print_spiking_vector();
+    void print_delays_vector();
+
+};
+
+class SNP_static_optimized: public SNP_model
+{
+public:
+    SNP_static_optimized(uint n, uint m);
+    ~SNP_static_optimized();
+
+protected:
+    int *z_vector;
+    int z;
+
+    void include_synapse(uint i, uint j);
+    void load_transition_matrix();
+    void calc_spiking_vector();
+    bool check_next_trans();
+    void calc_transition();
+    void print_transition_matrix();
+    void print_spiking_vector();
+    void print_delays_vector();
+
+};
+
+class SNP_static_cublas: public SNP_model
+{
+public:
+    SNP_static_cublas(uint n, uint m);
+    ~SNP_static_cublas();
+
+protected:
+
+    // CPU part
+    float *trans_matrix;    // transition matrix (# rules * # neurons)
+    float *spiking_vector;  // spiking vector (# neurons)
+    int neuron_to_include;  // neuron whose rules have yet to be included. if neuron_to_include == number of neurons, all neuron's rules have been included.
+
+    // GPU counterpart    
+    float *d_trans_matrix;    
+    float *d_spiking_vector; 
+    cublasHandle_t handle;
+
+    void include_synapse(uint i, uint j);
+    void load_transition_matrix();
+    void calc_spiking_vector();
+    bool check_next_trans();
+    void calc_transition();
+    void print_transition_matrix();
+    void print_spiking_vector();
+    void print_delays_vector();
+
+};
+
+class SNP_static_cusparse: public SNP_model
+{
+public:
+    SNP_static_cusparse(uint n, uint m);
+    ~SNP_static_cusparse();
+
+protected:
+
+    // CPU part
+    float *spiking_vector;  // spiking vector (# neurons)
+    int neuron_to_include;  // neuron whose rules have yet to be included. if neuron_to_include == number of neurons, all neuron's rules have been included.
+    int nnz;                // non-zero elements of transition matrix
+    float alpha;
+    float beta;
+    // GPU counterpart      
+    float *d_spiking_vector; 
+    cusparseHandle_t     handle;
+    cusparseSpMatDescr_t cse_trans_mx;
+    cusparseDnVecDescr_t cse_spkv, cse_confv;
+    void *d_buffer;
+    int * d_csrOffsets;
+    int * d_csrColumns;
+    float * d_csrValues;
+
+    void include_synapse(uint i, uint j);
+    int get_nnz();
+    void load_transition_matrix();
+    void calc_spiking_vector();
+    bool check_next_trans();
+    void calc_transition();
+    void print_transition_matrix();
+    void print_spiking_vector();
+    void print_delays_vector();
+
+};
+
+
 
 #endif
